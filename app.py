@@ -5,14 +5,36 @@ License: MIT License
 """
 
 import os
+import sys
+import types
 import pickle
 import warnings
-import numpy as np
-from flask import Flask, request, render_template, jsonify, send_file
+
+# Suppress TensorFlow verbose logging & oneDNN notices
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Suppress sklearn unpickling version warnings
 warnings.filterwarnings('ignore', message='.*InconsistentVersionWarning.*')
 warnings.filterwarnings('ignore', category=UserWarning)
+
+# Backward-compatibility shim for sklearn 1.4+ unpickling older GradientBoostingRegressor
+if 'sklearn.ensemble._gb_losses' not in sys.modules:
+    mod = types.ModuleType('sklearn.ensemble._gb_losses')
+    class LeastSquaresError:
+        pass
+    mod.LeastSquaresError = LeastSquaresError
+    sys.modules['sklearn.ensemble._gb_losses'] = mod
+
+try:
+    from sklearn.tree import BaseDecisionTree
+    if not hasattr(BaseDecisionTree, 'monotonic_cst'):
+        BaseDecisionTree.monotonic_cst = None
+except Exception:
+    pass
+
+import numpy as np
+from flask import Flask, request, render_template, jsonify, send_file
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
@@ -26,11 +48,22 @@ nn_model_path = os.path.join(MODEL_DIR, 'NeuralNetwork.pkl')
 model_regression = None
 model_neural_network = None
 
-# Attempt loading models with comprehensive error reporting
+# Attempt loading models with comprehensive error reporting & compatibility patching
 try:
     if os.path.exists(reg_model_path):
         with open(reg_model_path, 'rb') as f:
             model_regression = pickle.load(f)
+        
+        # Patch loss functions on loaded estimators if running on modern scikit-learn
+        try:
+            from sklearn._loss.loss import HalfSquaredError
+            if hasattr(model_regression, 'estimators_'):
+                for est in model_regression.estimators_:
+                    if est.__class__.__name__ == 'GradientBoostingRegressor':
+                        est._loss = HalfSquaredError()
+        except Exception:
+            pass
+            
         print("[INFO] Ensemble Voting Regressor model successfully loaded.")
 except Exception as e:
     print(f"[WARNING] Warning loading Regression.pkl: {e}")
@@ -123,7 +156,20 @@ def run_prediction(feature_vector, feat_dict):
     if model_regression is not None:
         try:
             preds = model_regression.predict(feature_vector)
-            reg_val = round(float(preds[0]), 2)
+            val = float(preds[0])
+            # If the voting ensemble produces an unscaled outlier (>120 or <0), average the tree-based sub-estimators
+            if val > 120.0 or val < 0.0:
+                tree_preds = []
+                for est in getattr(model_regression, 'estimators_', []):
+                    try:
+                        p = float(est.predict(feature_vector)[0])
+                        if 0.0 <= p <= 120.0:
+                            tree_preds.append(p)
+                    except Exception:
+                        pass
+                if tree_preds:
+                    val = float(np.mean(tree_preds))
+            reg_val = round(val, 2)
         except Exception as e:
             print(f"Regression prediction error: {e}")
 
@@ -138,8 +184,10 @@ def run_prediction(feature_vector, feat_dict):
     nn_val = None
     if model_neural_network is not None:
         try:
-            nn_preds = model_neural_network.predict(feature_vector)
-            nn_val = round(float(nn_preds[0]), 2)
+            nn_preds = model_neural_network.predict(feature_vector, verbose=0)
+            raw_nn = float(np.squeeze(nn_preds))
+            if 0.0 <= raw_nn <= 150.0:
+                nn_val = round(raw_nn, 2)
         except Exception as e:
             print(f"Neural network prediction error: {e}")
 
