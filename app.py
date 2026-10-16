@@ -6,8 +6,13 @@ License: MIT License
 
 import os
 import pickle
+import warnings
 import numpy as np
 from flask import Flask, request, render_template, jsonify, send_file
+
+# Suppress sklearn unpickling version warnings
+warnings.filterwarnings('ignore', message='.*InconsistentVersionWarning.*')
+warnings.filterwarnings('ignore', category=UserWarning)
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
