@@ -3,64 +3,328 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="./styles.css">
-    <title>Concrete Sterength Prediction</title>
+    <title>Concrete Compressive Strength Prediction | Civil AI Platform</title>
+    <meta name="description" content="Civil engineering AI dashboard to predict concrete compressive strength from mix proportions using Ensemble Voting Regressor and Deep Neural Networks.">
+    
+    <!-- Design & Stylesheets -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Fallback if static folder lookup differs -->
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <article>
-        <header>
-            <h1>Concrete Strength Prediction</h1>
-            <p>This is a predictive model that can predict the concrete strength based on composition and other pertinent variables.</p>
-        </header>
-        <main>
-            <form action="{{url_for('predict')}}" method="post">
+    <div class="app-wrapper">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="brand-section">
+                <div class="brand-icon">🏗️</div>
                 <div>
-                    <div>Quantity of Cement</div>
-                    <input type="number" step=".01" name="Quanity of Cement in kg" placeholder="Quantity of cement" required="required" />
-                    <div>kgs</div>
+                    <h1 class="brand-title">Concrete Strength AI</h1>
+                    <div class="brand-subtitle">
+                        <span>Dual-Engine Compressive Strength Estimator</span>
+                        <span class="brand-badge">Civil ML v2.0</span>
+                    </div>
                 </div>
-                <div>
-                    <div>Quantity of blast furnace slag</div>
-                    <input type="number" step=".01" name="Quanity of blast furnace slag in kg" placeholder="Quanity of blast_furnace_slag in kg" required="required"/>
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>Quantity of fly ash</div>
-                    <input type="number" step=".01" name="Quanity of fly ash in kg" placeholder="Quanity of fly ash in kg" required="required" />
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>Quanity of water</div>
-                    <input type="number" step=".01" name="Quanity of water in kg" placeholder="Quanity of water in kg" required="required" />
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>Quanity of superplasticizer</div>
-                    <input type="number" step=".01" name="Quanity of superplasticizer in kg" placeholder="Quanity of superplasticizer in kg" required="required" />
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>Quanity of coarse aggregate</div>
-                    <input type="number"  step=".01"name="Quanity of coarse_aggregate in kg" placeholder="Quanity of coarse_aggregate in kg" required="required" />
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>Quanity of fine aggregate</div>
-                    <input type="number" step=".01" name="Quanity of fine_aggregate in kg" placeholder="Quanity of fine_aggregate in kg" required="required" />
-                    <div>kgs</div>
-                </div>
-                <div>
-                    <div>No of days to cure</div>
-                    <input type="number" name="No of days to cure" placeholder="No of days to cure" required="required" />
-                    <div>days</div>
-                </div>
-                <div class="submit-container"><button type="submit">Predict  Concrete Strength</button></div>
-            </form>
-            <div class="result">
-                <h2>{{predictionText}}</h2>
             </div>
+
+            <div class="author-chip">
+                <div class="author-avatar">AK</div>
+                <div>
+                    <span>Author & Owner:</span>
+                    <strong>Ali Hassan Kadri</strong>
+                </div>
+            </div>
+        </header>
+
+        <!-- Mix Design Presets -->
+        <section class="presets-container" aria-label="Quick Mix Presets">
+            <div class="presets-label">
+                <span>⚡ Industry Mix Presets (1-Click Test):</span>
+            </div>
+            <div class="presets-grid">
+                <button type="button" class="preset-btn active" data-preset="c25-slab" id="preset-c25">
+                    🏢 Standard C25 Slab
+                </button>
+                <button type="button" class="preset-btn" data-preset="c50-high" id="preset-c50">
+                    🏛️ High-Strength C50 Column
+                </button>
+                <button type="button" class="preset-btn" data-preset="eco-flyash" id="preset-eco">
+                    🌱 Eco Fly-Ash Green Mix
+                </button>
+                <button type="button" class="preset-btn" data-preset="early-7d" id="preset-early">
+                    ⏱️ Early Strength (7 Days)
+                </button>
+                <button type="button" class="preset-btn" data-preset="mass-dam" id="preset-dam">
+                    🌊 Mass Dam / Foundation
+                </button>
+            </div>
+        </section>
+
+        <!-- Main Dashboard Grid -->
+        <main class="dashboard-grid">
+            <!-- Left Column: Formulation Controls Form -->
+            <section class="glass-panel" aria-label="Mix Formulation Input">
+                <div class="panel-header">
+                    <h2 class="panel-title">
+                        <span class="panel-title-icon">🧪</span>
+                        Constituent Proportions & Curing
+                    </h2>
+                    <span class="brand-badge">Per m³ Concrete</span>
+                </div>
+
+                <form id="prediction-form" action="{{ url_for('predict') }}" method="POST">
+                    <div class="features-grid">
+                        <!-- Cement -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="cement" class="feature-label">Cement Content</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="cement" name="cement" class="input-numeric" 
+                                           step="0.1" min="100" max="600" value="{{ form_values.cement if form_values else '280' }}" required>
+                                </div>
+                                <input type="range" id="cement-slider" class="custom-range-slider" 
+                                       min="100" max="600" step="1" value="{{ form_values.cement if form_values else '280' }}">
+                                <div class="range-bounds">
+                                    <span>100 kg</span>
+                                    <span>600 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Blast Furnace Slag -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="slag" class="feature-label">Blast Furnace Slag</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="slag" name="slag" class="input-numeric" 
+                                           step="0.1" min="0" max="400" value="{{ form_values.slag if form_values else '0' }}" required>
+                                </div>
+                                <input type="range" id="slag-slider" class="custom-range-slider" 
+                                       min="0" max="400" step="1" value="{{ form_values.slag if form_values else '0' }}">
+                                <div class="range-bounds">
+                                    <span>0 kg</span>
+                                    <span>400 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fly Ash -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="fly_ash" class="feature-label">Fly Ash (Pozzolan)</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="fly_ash" name="fly_ash" class="input-numeric" 
+                                           step="0.1" min="0" max="300" value="{{ form_values.fly_ash if form_values else '0' }}" required>
+                                </div>
+                                <input type="range" id="fly_ash-slider" class="custom-range-slider" 
+                                       min="0" max="300" step="1" value="{{ form_values.fly_ash if form_values else '0' }}">
+                                <div class="range-bounds">
+                                    <span>0 kg</span>
+                                    <span>300 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Water -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="water" class="feature-label">Mixing Water</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="water" name="water" class="input-numeric" 
+                                           step="0.1" min="100" max="300" value="{{ form_values.water if form_values else '185' }}" required>
+                                </div>
+                                <input type="range" id="water-slider" class="custom-range-slider" 
+                                       min="100" max="300" step="1" value="{{ form_values.water if form_values else '185' }}">
+                                <div class="range-bounds">
+                                    <span>100 kg</span>
+                                    <span>300 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Superplasticizer -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="superplasticizer" class="feature-label">Superplasticizer</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="superplasticizer" name="superplasticizer" class="input-numeric" 
+                                           step="0.1" min="0" max="40" value="{{ form_values.superplasticizer if form_values else '2.5' }}" required>
+                                </div>
+                                <input type="range" id="superplasticizer-slider" class="custom-range-slider" 
+                                       min="0" max="40" step="0.5" value="{{ form_values.superplasticizer if form_values else '2.5' }}">
+                                <div class="range-bounds">
+                                    <span>0 kg</span>
+                                    <span>40 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Coarse Aggregate -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="coarse_agg" class="feature-label">Coarse Aggregate</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="coarse_agg" name="coarse_agg" class="input-numeric" 
+                                           step="0.1" min="700" max="1300" value="{{ form_values.coarse_agg if form_values else '1040' }}" required>
+                                </div>
+                                <input type="range" id="coarse_agg-slider" class="custom-range-slider" 
+                                       min="700" max="1300" step="5" value="{{ form_values.coarse_agg if form_values else '1040' }}">
+                                <div class="range-bounds">
+                                    <span>700 kg</span>
+                                    <span>1300 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fine Aggregate -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="fine_agg" class="feature-label">Fine Aggregate (Sand)</label>
+                                <span class="feature-unit">kg/m³</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="fine_agg" name="fine_agg" class="input-numeric" 
+                                           step="0.1" min="500" max="1100" value="{{ form_values.fine_agg if form_values else '780' }}" required>
+                                </div>
+                                <input type="range" id="fine_agg-slider" class="custom-range-slider" 
+                                       min="500" max="1100" step="5" value="{{ form_values.fine_agg if form_values else '780' }}">
+                                <div class="range-bounds">
+                                    <span>500 kg</span>
+                                    <span>1100 kg</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Age -->
+                        <div class="feature-control-group">
+                            <div class="feature-meta">
+                                <label for="age" class="feature-label">Curing Age</label>
+                                <span class="feature-unit">Days</span>
+                            </div>
+                            <div class="input-slider-sync">
+                                <div class="input-numeric-wrapper">
+                                    <input type="number" id="age" name="age" class="input-numeric" 
+                                           step="1" min="1" max="365" value="{{ form_values.age if form_values else '28' }}" required>
+                                </div>
+                                <input type="range" id="age-slider" class="custom-range-slider" 
+                                       min="1" max="365" step="1" value="{{ form_values.age if form_values else '28' }}">
+                                <div class="range-bounds">
+                                    <span>1 Day</span>
+                                    <span>365 Days</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Engineering Diagnostics Bar -->
+                    <div class="mix-diagnostics">
+                        <div class="diagnostic-item">
+                            <span class="diagnostic-title">Water/Cement (w/c)</span>
+                            <span class="diagnostic-value" id="diag-wc">0.66</span>
+                        </div>
+                        <div class="diagnostic-item">
+                            <span class="diagnostic-title">Total Binder</span>
+                            <span class="diagnostic-value" id="diag-binder">280.0 kg</span>
+                        </div>
+                        <div class="diagnostic-item">
+                            <span class="diagnostic-title">Batch Density</span>
+                            <span class="diagnostic-value" id="diag-density">2287 kg/m³</span>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-submit-predict" id="btn-predict">
+                        <span class="spinner" id="btn-spinner"></span>
+                        <span id="btn-text">Predict Compressive Strength</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Right Column: Prediction Outcomes & Verification -->
+            <section class="results-section" aria-label="Strength Prediction Output">
+                <!-- Hero Primary Prediction Card -->
+                <div class="strength-hero-card">
+                    <div class="result-model-badge">
+                        <span>⭐ Ensemble Voting Regressor (R² = 91.2%)</span>
+                    </div>
+                    <div class="strength-subtext">Estimated Compressive Strength:</div>
+                    <div class="strength-value-display">
+                        <span class="strength-number" id="result-regression-val">{{ regression_strength if regression_strength is defined else '31.42' }}</span>
+                        <span class="strength-unit">MPa</span>
+                    </div>
+
+                    <!-- Gauge Progress Bar -->
+                    <div class="gauge-wrapper">
+                        <div class="gauge-track">
+                            <div class="gauge-fill" id="gauge-fill-bar" style="width: {{ gauge_pct if gauge_pct is defined else '37%' }};"></div>
+                        </div>
+                        <div class="gauge-scale-labels">
+                            <span>0 MPa</span>
+                            <span>20 MPa (Low)</span>
+                            <span>40 MPa (Commercial)</span>
+                            <span>60+ MPa (High)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Secondary Model Comparison -->
+                <div class="comparison-card">
+                    <div class="comparison-model-name">
+                        <span>🧠 Artificial Neural Network:</span>
+                    </div>
+                    <div class="comparison-value" id="result-nn-val">
+                        {{ nn_strength if nn_strength is defined else '29.85' }} MPa
+                    </div>
+                </div>
+
+                <!-- Eurocode / ASTM Classification Panel -->
+                <div class="classification-panel">
+                    <div class="grade-badge-container">
+                        <span class="panel-title" style="font-size: 15px;">Eurocode Classification:</span>
+                        <span class="concrete-grade-tag" id="result-grade-tag">
+                            {{ concrete_grade if concrete_grade is defined else 'C20/25 - Standard Structural' }}
+                        </span>
+                    </div>
+                    <p class="compliance-info" id="result-description">
+                        {{ grade_desc if grade_desc is defined else 'Standard commercial structural grade for domestic foundations, slabs, footings, and pavement.' }}
+                    </p>
+                </div>
+            </section>
         </main>
-    </article>
+
+        <!-- Hidden inputs for server-side hydration -->
+        {% if regression_strength is defined %}
+        <input type="hidden" id="initial-reg-value" value="{{ regression_strength }}">
+        {% endif %}
+        {% if nn_strength is defined %}
+        <input type="hidden" id="initial-nn-value" value="{{ nn_strength }}">
+        {% endif %}
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Developed with precision by <strong>Ali Hassan Kadri</strong> &bull; Open source under <a href="/LICENSE" target="_blank">MIT License</a> &bull; Concrete Strength Prediction System</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="/static/js/app.js"></script>
 </body>
 </html>
