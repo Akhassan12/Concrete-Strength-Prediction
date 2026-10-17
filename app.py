@@ -114,8 +114,53 @@ def classify_concrete_grade(strength_mpa):
         )
 
 
+def validate_inputs(feat_dict):
+    """
+    Validates input mix features against physical laws and civil engineering standards.
+    Returns:
+        (errors: list of fatal validation error strings,
+         advisories: list of warning strings for domain extrapolation)
+    """
+    errors = []
+    advisories = []
+
+    # 1. Non-negativity constraints
+    for k, v in feat_dict.items():
+        if k != 'age' and v < 0:
+            errors.append(f"{k.replace('_', ' ').capitalize()} cannot be negative ({v} kg/m³).")
+    
+    if feat_dict['age'] <= 0:
+        errors.append(f"Curing age must be strictly positive (> 0 days, got {feat_dict['age']}).")
+
+    # 2. Minimum physical viability
+    total_binder = feat_dict['cement'] + feat_dict['slag'] + feat_dict['fly_ash']
+    if total_binder <= 0:
+        errors.append("Total cementitious binder (cement + slag + fly ash) must be greater than 0 kg/m³.")
+    
+    if feat_dict['water'] <= 0:
+        errors.append("Water content must be greater than 0 kg/m³.")
+
+    # 3. Batch density plausibility (sum of ingredients per m³)
+    total_density = sum(feat_dict.values()) - feat_dict['age']
+    if total_density < 1400 or total_density > 3200:
+        errors.append(f"Mix batch density ({total_density:.1f} kg/m³) is physically unviable for concrete (plausible: 1800–2800 kg/m³).")
+
+    # 4. Domain extrapolation advisories (UCI dataset empirical bounds)
+    if feat_dict['cement'] < 100 or feat_dict['cement'] > 540:
+        advisories.append(f"Cement content ({feat_dict['cement']:.1f} kg/m³) is outside empirical training bounds [102, 540] kg/m³.")
+    if feat_dict['age'] > 365:
+        advisories.append(f"Curing age ({feat_dict['age']:.0f} days) exceeds max dataset age (365 days); predictions extrapolate.")
+    wb_ratio = feat_dict['water'] / max(total_binder, 1.0)
+    if wb_ratio < 0.22 or wb_ratio > 1.15:
+        advisories.append(f"Water/binder ratio ({wb_ratio:.2f}) is outside typical concrete mix envelope [0.25, 0.85].")
+    if feat_dict['superplasticizer'] > 32.2:
+        advisories.append(f"Superplasticizer ({feat_dict['superplasticizer']:.1f} kg/m³) exceeds empirical max dosage (32.2 kg/m³).")
+
+    return errors, advisories
+
+
 def extract_features(data_dict):
-    """Extracts features in exact sequence required by the models."""
+    """Extracts features in exact sequence required by the models with strict validation."""
     try:
         cement = float(data_dict.get('cement', data_dict.get('Quanity of Cement in kg', 280.0)))
         slag = float(data_dict.get('slag', data_dict.get('Quanity of blast furnace slag in kg', 0.0)))
@@ -126,17 +171,24 @@ def extract_features(data_dict):
         fine_agg = float(data_dict.get('fine_agg', data_dict.get('Quanity of fine_aggregate in kg', 780.0)))
         age = float(data_dict.get('age', data_dict.get('No of days to cure', 28.0)))
         
-        feature_vector = np.array([[cement, slag, fly_ash, water, superplasticizer, coarse_agg, fine_agg, age]])
-        return feature_vector, {
+        feat_dict = {
             'cement': cement, 'slag': slag, 'fly_ash': fly_ash, 'water': water,
             'superplasticizer': superplasticizer, 'coarse_agg': coarse_agg,
             'fine_agg': fine_agg, 'age': age
         }
+
+        # Perform input validation
+        errors, advisories = validate_inputs(feat_dict)
+        if errors:
+            raise ValueError("Input validation failed: " + "; ".join(errors))
+
+        feature_vector = np.array([[cement, slag, fly_ash, water, superplasticizer, coarse_agg, fine_agg, age]])
+        return feature_vector, feat_dict, advisories
     except Exception as e:
-        raise ValueError(f"Feature extraction error: {e}")
+        raise ValueError(f"{e}")
 
 
-def run_prediction(feature_vector, feat_dict):
+def run_prediction(feature_vector, feat_dict, advisories=None):
     """Executes predictions across both models. Returns errors if a model is unavailable."""
     # 1. Regression Model
     reg_val = None
@@ -190,7 +242,8 @@ def run_prediction(feature_vector, feat_dict):
         'concrete_grade': grade,
         'grade_desc': desc,
         'water_binder_ratio': wb_ratio,
-        'total_mix_density_kg_m3': density
+        'total_mix_density_kg_m3': density,
+        'advisories': advisories or []
     }
 
     # Include error messages when models fail so the user knows
@@ -209,8 +262,8 @@ def home():
         'cement': 280.0, 'slag': 0.0, 'fly_ash': 0.0, 'water': 185.0,
         'superplasticizer': 2.5, 'coarse_agg': 1040.0, 'fine_agg': 780.0, 'age': 28.0
     }
-    feats, feat_dict = extract_features(defaults)
-    res = run_prediction(feats, feat_dict)
+    feats, feat_dict, advisories = extract_features(defaults)
+    res = run_prediction(feats, feat_dict, advisories)
     
     reg_strength = res['regression_strength_mpa']
     if reg_strength is not None:
@@ -225,7 +278,8 @@ def home():
         nn_strength=res['neural_network_strength_mpa'] if res['neural_network_strength_mpa'] is not None else 'N/A',
         concrete_grade=res['concrete_grade'],
         grade_desc=res['grade_desc'],
-        gauge_pct=gauge_pct
+        gauge_pct=gauge_pct,
+        advisories=res.get('advisories', [])
     )
 
 
@@ -233,8 +287,8 @@ def home():
 def predict():
     """Handles traditional HTML Form POST submissions."""
     try:
-        feature_vector, feat_dict = extract_features(request.form)
-        res = run_prediction(feature_vector, feat_dict)
+        feature_vector, feat_dict, advisories = extract_features(request.form)
+        res = run_prediction(feature_vector, feat_dict, advisories)
 
         reg_strength = res['regression_strength_mpa']
         if reg_strength is not None:
@@ -249,7 +303,8 @@ def predict():
             nn_strength=res['neural_network_strength_mpa'] if res['neural_network_strength_mpa'] is not None else 'N/A',
             concrete_grade=res['concrete_grade'],
             grade_desc=res['grade_desc'],
-            gauge_pct=gauge_pct
+            gauge_pct=gauge_pct,
+            advisories=res.get('advisories', [])
         )
     except Exception as e:
         return render_template('index.html', error=str(e))
@@ -260,8 +315,8 @@ def api_predict():
     """REST API endpoint returning JSON prediction responses."""
     try:
         data = request.get_json(silent=True) or request.form.to_dict()
-        feature_vector, feat_dict = extract_features(data)
-        res = run_prediction(feature_vector, feat_dict)
+        feature_vector, feat_dict, advisories = extract_features(data)
+        res = run_prediction(feature_vector, feat_dict, advisories)
         return jsonify({
             'status': 'success',
             'prediction': res

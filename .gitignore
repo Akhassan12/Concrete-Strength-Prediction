@@ -7,3 +7,9 @@ venv/
 env/
 .DS_Store
 *.bak
+docx
+figures
+generate_paper_artifacts.py
+extra_validation_nn.py
+extra_validation_trees.py
+
