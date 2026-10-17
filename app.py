@@ -47,6 +47,7 @@ nn_model_path = os.path.join(MODEL_DIR, 'NeuralNetwork.pkl')
 
 model_regression = None
 model_neural_network = None
+nn_scaler = None
 
 # Attempt loading models with comprehensive error reporting & compatibility patching
 try:
@@ -71,31 +72,17 @@ except Exception as e:
 try:
     if os.path.exists(nn_model_path):
         with open(nn_model_path, 'rb') as f:
-            model_neural_network = pickle.load(f)
-        print("[INFO] Deep Neural Network model successfully loaded.")
+            nn_data = pickle.load(f)
+        # Support both bundled (dict with model+scaler) and legacy (bare model) formats
+        if isinstance(nn_data, dict) and 'model' in nn_data:
+            model_neural_network = nn_data['model']
+            nn_scaler = nn_data.get('scaler', None)
+            print("[INFO] Deep Neural Network model loaded (with scaler).")
+        else:
+            model_neural_network = nn_data
+            print("[INFO] Deep Neural Network model loaded (legacy format, no scaler).")
 except Exception as e:
     print(f"[WARNING] Warning loading NeuralNetwork.pkl: {e}")
-
-
-def calculate_calibrated_strength(cement, slag, fly_ash, water, superplasticizer, coarse_agg, fine_agg, age):
-    """
-    Empirical Abrams' Law formula for concrete compressive strength (MPa)
-    used as calibrated fallback if a serialized model dependency is missing.
-    """
-    binder = cement + 0.8 * slag + 0.5 * fly_ash
-    wc_ratio = water / max(binder, 1.0)
-    
-    # Base 28-day strength from water-cement ratio
-    base_28d = 100.0 / (3.2 ** (2.1 * wc_ratio))
-    
-    # Curing age factor (logarithmic hydration growth)
-    age_factor = (np.log(max(age, 1.0)) / np.log(28.0)) ** 0.58 if age < 28 else (1.0 + 0.08 * np.log10(age / 28.0))
-    
-    # Superplasticizer compaction density factor
-    sp_factor = 1.0 + (min(superplasticizer, 25.0) * 0.012)
-    
-    pred = base_28d * age_factor * sp_factor
-    return max(round(float(pred), 2), 2.5)
 
 
 def classify_concrete_grade(strength_mpa):
@@ -150,63 +137,69 @@ def extract_features(data_dict):
 
 
 def run_prediction(feature_vector, feat_dict):
-    """Executes predictions across both models with fallback safety."""
+    """Executes predictions across both models. Returns errors if a model is unavailable."""
     # 1. Regression Model
     reg_val = None
+    reg_error = None
     if model_regression is not None:
         try:
             preds = model_regression.predict(feature_vector)
             val = float(preds[0])
-            # If the voting ensemble produces an unscaled outlier (>120 or <0), average the tree-based sub-estimators
-            if val > 120.0 or val < 0.0:
-                tree_preds = []
-                for est in getattr(model_regression, 'estimators_', []):
-                    try:
-                        p = float(est.predict(feature_vector)[0])
-                        if 0.0 <= p <= 120.0:
-                            tree_preds.append(p)
-                    except Exception:
-                        pass
-                if tree_preds:
-                    val = float(np.mean(tree_preds))
             reg_val = round(val, 2)
         except Exception as e:
+            reg_error = f"Ensemble prediction failed: {e}"
             print(f"Regression prediction error: {e}")
-
-    if reg_val is None:
-        reg_val = calculate_calibrated_strength(
-            feat_dict['cement'], feat_dict['slag'], feat_dict['fly_ash'],
-            feat_dict['water'], feat_dict['superplasticizer'],
-            feat_dict['coarse_agg'], feat_dict['fine_agg'], feat_dict['age']
-        )
+    else:
+        reg_error = "Ensemble model not loaded"
 
     # 2. Neural Network Model
     nn_val = None
+    nn_error = None
     if model_neural_network is not None:
         try:
-            nn_preds = model_neural_network.predict(feature_vector, verbose=0)
+            # Apply scaler if available (required for correct NN predictions)
+            if nn_scaler is not None:
+                nn_input = nn_scaler.transform(feature_vector)
+            else:
+                nn_input = feature_vector
+            nn_preds = model_neural_network.predict(nn_input, verbose=0)
             raw_nn = float(np.squeeze(nn_preds))
-            if 0.0 <= raw_nn <= 150.0:
-                nn_val = round(raw_nn, 2)
+            nn_val = round(raw_nn, 2)
         except Exception as e:
+            nn_error = f"Neural network prediction failed: {e}"
             print(f"Neural network prediction error: {e}")
+    else:
+        nn_error = "Neural network model not loaded"
 
-    if nn_val is None:
-        nn_val = round(reg_val * 0.96 + 0.8, 2)
+    # Use whichever model succeeded for classification; prefer ensemble
+    primary_strength = reg_val if reg_val is not None else nn_val
+    if primary_strength is not None:
+        grade, desc = classify_concrete_grade(primary_strength)
+    else:
+        grade = "N/A"
+        desc = "Both models failed to produce a prediction."
 
-    grade, desc = classify_concrete_grade(reg_val)
+    # Water-to-binder ratio (cement + slag + fly ash), not just w/c
     total_binder = feat_dict['cement'] + feat_dict['slag'] + feat_dict['fly_ash']
-    wc_ratio = round(feat_dict['water'] / max(total_binder, 1.0), 2)
+    wb_ratio = round(feat_dict['water'] / max(total_binder, 1.0), 2)
     density = round(sum(feat_dict.values()) - feat_dict['age'], 1)
 
-    return {
+    result = {
         'regression_strength_mpa': reg_val,
         'neural_network_strength_mpa': nn_val,
         'concrete_grade': grade,
         'grade_desc': desc,
-        'water_cement_ratio': wc_ratio,
+        'water_binder_ratio': wb_ratio,
         'total_mix_density_kg_m3': density
     }
+
+    # Include error messages when models fail so the user knows
+    if reg_error:
+        result['regression_error'] = reg_error
+    if nn_error:
+        result['neural_network_error'] = nn_error
+
+    return result
 
 
 @app.route('/')
@@ -219,13 +212,17 @@ def home():
     feats, feat_dict = extract_features(defaults)
     res = run_prediction(feats, feat_dict)
     
-    gauge_pct = f"{min(max(res['regression_strength_mpa'] / 85 * 100, 5), 100):.1f}%"
+    reg_strength = res['regression_strength_mpa']
+    if reg_strength is not None:
+        gauge_pct = f"{min(max(reg_strength / 85 * 100, 5), 100):.1f}%"
+    else:
+        gauge_pct = "5%"
     
     return render_template(
         'index.html',
         form_values=defaults,
-        regression_strength=res['regression_strength_mpa'],
-        nn_strength=res['neural_network_strength_mpa'],
+        regression_strength=reg_strength if reg_strength is not None else 'N/A',
+        nn_strength=res['neural_network_strength_mpa'] if res['neural_network_strength_mpa'] is not None else 'N/A',
         concrete_grade=res['concrete_grade'],
         grade_desc=res['grade_desc'],
         gauge_pct=gauge_pct
@@ -238,13 +235,18 @@ def predict():
     try:
         feature_vector, feat_dict = extract_features(request.form)
         res = run_prediction(feature_vector, feat_dict)
-        gauge_pct = f"{min(max(res['regression_strength_mpa'] / 85 * 100, 5), 100):.1f}%"
+
+        reg_strength = res['regression_strength_mpa']
+        if reg_strength is not None:
+            gauge_pct = f"{min(max(reg_strength / 85 * 100, 5), 100):.1f}%"
+        else:
+            gauge_pct = "5%"
         
         return render_template(
             'index.html',
             form_values=feat_dict,
-            regression_strength=res['regression_strength_mpa'],
-            nn_strength=res['neural_network_strength_mpa'],
+            regression_strength=reg_strength if reg_strength is not None else 'N/A',
+            nn_strength=res['neural_network_strength_mpa'] if res['neural_network_strength_mpa'] is not None else 'N/A',
             concrete_grade=res['concrete_grade'],
             grade_desc=res['grade_desc'],
             gauge_pct=gauge_pct

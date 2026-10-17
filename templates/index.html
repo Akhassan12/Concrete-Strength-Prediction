@@ -8,8 +8,7 @@
     
     <!-- Design & Stylesheets -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Fallback if static folder lookup differs -->
-    <link rel="stylesheet" href="/static/css/style.css">
+
 </head>
 <body>
     <div class="app-wrapper">
@@ -237,7 +236,7 @@
                     <!-- Live Engineering Diagnostics Bar -->
                     <div class="mix-diagnostics">
                         <div class="diagnostic-item">
-                            <span class="diagnostic-title">Water/Cement (w/c)</span>
+                            <span class="diagnostic-title">Water/Binder (w/b)</span>
                             <span class="diagnostic-value" id="diag-wc">0.66</span>
                         </div>
                         <div class="diagnostic-item">
@@ -325,6 +324,5 @@
 
     <!-- Scripts -->
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    <script src="/static/js/app.js"></script>
 </body>
 </html>
