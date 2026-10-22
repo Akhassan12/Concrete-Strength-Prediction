@@ -273,15 +273,31 @@ def run_prediction(feature_vector, feat_dict, advisories=None):
     return result
 
 
-@app.route('/')
+@app.route('/', methods=['GET', 'HEAD'])
 def home():
     """Renders the dashboard with default parameters."""
+    if request.method == 'HEAD':
+        return '', 200
+
     defaults = {
         'cement': 280.0, 'slag': 0.0, 'fly_ash': 0.0, 'water': 185.0,
         'superplasticizer': 2.5, 'coarse_agg': 1040.0, 'fine_agg': 780.0, 'age': 28.0
     }
-    feats, feat_dict, advisories = extract_features(defaults)
-    res = run_prediction(feats, feat_dict, advisories)
+    
+    # If models are loaded, compute dynamically; otherwise use precomputed defaults while warming up
+    if _models_loaded:
+        feats, feat_dict, advisories = extract_features(defaults)
+        res = run_prediction(feats, feat_dict, advisories)
+    else:
+        res = {
+            'regression_strength_mpa': 33.45,
+            'neural_network_strength_mpa': 29.01,
+            'concrete_grade': 'C30/37 - Reinforced Commercial',
+            'grade_desc': 'Durable reinforced concrete for external paved areas, floor slabs, structural walls, and beams.',
+            'water_binder_ratio': 0.66,
+            'total_mix_density_kg_m3': 2287.5,
+            'advisories': []
+        }
     
     reg_strength = res['regression_strength_mpa']
     if reg_strength is not None:
