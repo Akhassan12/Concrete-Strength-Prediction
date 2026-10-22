@@ -10,9 +10,10 @@ import types
 import pickle
 import warnings
 
-# Suppress TensorFlow verbose logging & oneDNN notices
+# Suppress TensorFlow verbose logging & oneDNN notices; force CPU mode for cloud containers
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Suppress sklearn unpickling version warnings
 warnings.filterwarnings('ignore', message='.*InconsistentVersionWarning.*')
