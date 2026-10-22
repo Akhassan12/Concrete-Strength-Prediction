@@ -9,6 +9,7 @@ import sys
 import types
 import pickle
 import warnings
+import threading
 
 # Suppress TensorFlow verbose logging & oneDNN notices; force CPU mode for cloud containers
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -50,40 +51,53 @@ model_regression = None
 model_neural_network = None
 nn_scaler = None
 
-# Attempt loading models with comprehensive error reporting & compatibility patching
-try:
-    if os.path.exists(reg_model_path):
-        with open(reg_model_path, 'rb') as f:
-            model_regression = pickle.load(f)
-        
-        # Patch loss functions on loaded estimators if running on modern scikit-learn
-        try:
-            from sklearn._loss.loss import HalfSquaredError
-            if hasattr(model_regression, 'estimators_'):
-                for est in model_regression.estimators_:
-                    if est.__class__.__name__ == 'GradientBoostingRegressor':
-                        est._loss = HalfSquaredError()
-        except Exception:
-            pass
-            
-        print("[INFO] Ensemble Voting Regressor model successfully loaded.")
-except Exception as e:
-    print(f"[WARNING] Warning loading Regression.pkl: {e}")
+_models_loaded = False
+_model_lock = threading.Lock()
 
-try:
-    if os.path.exists(nn_model_path):
-        with open(nn_model_path, 'rb') as f:
-            nn_data = pickle.load(f)
-        # Support both bundled (dict with model+scaler) and legacy (bare model) formats
-        if isinstance(nn_data, dict) and 'model' in nn_data:
-            model_neural_network = nn_data['model']
-            nn_scaler = nn_data.get('scaler', None)
-            print("[INFO] Deep Neural Network model loaded (with scaler).")
-        else:
-            model_neural_network = nn_data
-            print("[INFO] Deep Neural Network model loaded (legacy format, no scaler).")
-except Exception as e:
-    print(f"[WARNING] Warning loading NeuralNetwork.pkl: {e}")
+def load_models():
+    """Loads models safely without blocking worker startup."""
+    global model_regression, model_neural_network, nn_scaler, _models_loaded
+    with _model_lock:
+        if _models_loaded:
+            return
+        
+        try:
+            if os.path.exists(reg_model_path):
+                with open(reg_model_path, 'rb') as f:
+                    model_regression = pickle.load(f)
+                
+                # Patch loss functions on loaded estimators if running on modern scikit-learn
+                try:
+                    from sklearn._loss.loss import HalfSquaredError
+                    if hasattr(model_regression, 'estimators_'):
+                        for est in model_regression.estimators_:
+                            if est.__class__.__name__ == 'GradientBoostingRegressor':
+                                est._loss = HalfSquaredError()
+                except Exception:
+                    pass
+                    
+                print("[INFO] Ensemble Voting Regressor model successfully loaded.")
+        except Exception as e:
+            print(f"[WARNING] Warning loading Regression.pkl: {e}")
+
+        try:
+            if os.path.exists(nn_model_path):
+                with open(nn_model_path, 'rb') as f:
+                    nn_data = pickle.load(f)
+                if isinstance(nn_data, dict) and 'model' in nn_data:
+                    model_neural_network = nn_data['model']
+                    nn_scaler = nn_data.get('scaler', None)
+                    print("[INFO] Deep Neural Network model loaded (with scaler).")
+                else:
+                    model_neural_network = nn_data
+                    print("[INFO] Deep Neural Network model loaded (legacy format, no scaler).")
+        except Exception as e:
+            print(f"[WARNING] Warning loading NeuralNetwork.pkl: {e}")
+        
+        _models_loaded = True
+
+# Start background warm-up immediately so worker starts listening in <0.1s
+threading.Thread(target=load_models, daemon=True).start()
 
 
 def classify_concrete_grade(strength_mpa):
@@ -191,6 +205,9 @@ def extract_features(data_dict):
 
 def run_prediction(feature_vector, feat_dict, advisories=None):
     """Executes predictions across both models. Returns errors if a model is unavailable."""
+    if not _models_loaded:
+        load_models()
+
     # 1. Regression Model
     reg_val = None
     reg_error = None
@@ -336,6 +353,15 @@ def view_license():
     if os.path.exists(license_path):
         return send_file(license_path, mimetype='text/plain')
     return "MIT License - Ali Hassan Kadri", 200
+
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Render monitoring."""
+    return jsonify({
+        'status': 'healthy',
+        'models_loaded': _models_loaded
+    }), 200
 
 
 if __name__ == '__main__':
