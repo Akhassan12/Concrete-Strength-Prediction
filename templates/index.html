@@ -268,11 +268,10 @@
                         <span class="strength-number" id="result-regression-val">{{ regression_strength if regression_strength is defined else '31.42' }}</span>
                         <span class="strength-unit">MPa</span>
                     </div>
-
                     <!-- Gauge Progress Bar -->
                     <div class="gauge-wrapper">
                         <div class="gauge-track">
-                            <div class="gauge-fill" id="gauge-fill-bar" style="width: {{ gauge_pct if gauge_pct is defined else '37%' }};"></div>
+                            <div class="gauge-fill" id="gauge-fill-bar" style="width: 37%;" data-gauge-pct="{{ gauge_pct if gauge_pct is defined else '37%' }}"></div>
                         </div>
                         <div class="gauge-scale-labels">
                             <span>0 MPa</span>

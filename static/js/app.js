@@ -241,5 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const initialNn = document.getElementById('initial-nn-value');
   if (initialReg && initialReg.value) {
     renderResults(parseFloat(initialReg.value), parseFloat(initialNn ? initialNn.value : 0));
+  } else if (gaugeFill && gaugeFill.dataset.gaugePct) {
+    gaugeFill.style.width = gaugeFill.dataset.gaugePct;
   }
 });

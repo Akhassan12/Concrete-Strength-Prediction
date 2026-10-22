@@ -151,7 +151,8 @@ try:
     tf.get_logger().setLevel('ERROR')
 
     nn_model = tf.keras.Sequential([
-        tf.keras.layers.Dense(128, activation='relu', input_shape=(8,)),
+        tf.keras.layers.Input(shape=(8,)),
+        tf.keras.layers.Dense(128, activation='relu'),
         tf.keras.layers.Dense(64, activation='relu'),
         tf.keras.layers.Dense(32, activation='relu'),
         tf.keras.layers.Dense(1, activation='linear')
